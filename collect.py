@@ -1,54 +1,72 @@
 import serial
 import time
 import csv
+import argparse
 
-arduino_port = '/dev/ttyUSB0'
-baud_rate = 9600
+def main():
+    parser = argparse.ArgumentParser(description='Collect sensor data from Arduino node')
+    parser.add_argument('--port', default='/dev/ttyUSB0', help='Serial port (default: /dev/ttyUSB0)')
+    parser.add_argument('--baud', type=int, default=9600, help='Baud rate (default: 9600)')
+    parser.add_argument('--node-id', default='node_1', help='Node identifier (default: node_1)')
+    parser.add_argument('--output', default='sensor_data.csv', help='Output CSV file (default: sensor_data.csv)')
+    parser.add_argument('--samples', type=int, default=1000, help='Number of samples to collect (default: 1000)')
+    args = parser.parse_args()
 
-try:
-    ser = serial.Serial(arduino_port, baud_rate, timeout=1)
-    print(f"Connected to Arduino on {arduino_port}")
-except serial.SerialException as e:
-    print(f"Error opening serial port: {e}")
-    exit()
+    try:
+        ser = serial.Serial(args.port, args.baud, timeout=1)
+        print(f"[{args.node_id}] Connected to Arduino on {args.port}")
+    except serial.SerialException as e:
+        print(f"Error opening serial port: {e}")
+        exit(1)
 
-filename = 'arduino_data.csv'
-try:
-    with open(filename, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(['Timestamp', 'SensorValue']) # Write header row
+    try:
+        with open(args.output, 'w', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(['Timestamp', 'NodeID', 'Distance', 'Anomaly'])
 
-        print(f"Collecting data to {filename}. Press Ctrl+C to stop.")
-        while True:
-            try:
-                # Read a line from the serial port
-                line = ser.readline().decode('utf-8').strip()
+            print(f"[{args.node_id}] Collecting data to {args.output}. Press Ctrl+C to stop.")
+            sample_count = 0
+            
+            while sample_count < args.samples:
+                try:
+                    line = ser.readline().decode('utf-8').strip()
 
-                if line:  # Check if a non-empty line was received
-                    try:
-                        sensor_value = int(line)  # Convert the received string to an integer
-                        timestamp = time.time()  # Get current timestamp
+                    if line:
+                        try:
+                            # Parse new format: distance,anomaly
+                            parts = line.split(',')
+                            if len(parts) == 2:
+                                distance = int(parts[0])
+                                anomaly = int(parts[1])
+                            else:
+                                # Fallback for old format (just distance)
+                                distance = int(line)
+                                anomaly = 0
+                            
+                            timestamp = time.time()
+                            csv_writer.writerow([timestamp, args.node_id, distance, anomaly])
+                            
+                            anomaly_str = " [ANOMALY]" if anomaly else ""
+                            print(f"[{args.node_id}] Distance: {distance} cm{anomaly_str}")
+                            
+                            sample_count += 1
 
-                        # Write data to CSV
-                        csv_writer.writerow([timestamp, sensor_value])
-                        print(f"Timestamp: {timestamp}, Sensor Value: {sensor_value}")
+                        except ValueError:
+                            print(f"[{args.node_id}] Could not parse data: {line}")
 
-                    except ValueError:
-                        print(f"Could not convert data to int: {line}")
+                except KeyboardInterrupt:
+                    print(f"\n[{args.node_id}] Data collection stopped by user.")
+                    break
+                except serial.SerialException as e:
+                    print(f"[{args.node_id}] Serial communication error: {e}")
+                    break
 
-            except KeyboardInterrupt:
-                print("\nData collection stopped by user.")
-                break
-            except serial.SerialException as e:
-                print(f"Serial communication error: {e}")
-                break
-            except Exception as e:
-                print(f"An unexpected error occurred: {e}")
-                break
+    except IOError as e:
+        print(f"Error opening/writing to file: {e}")
+    finally:
+        if 'ser' in locals() and ser.is_open:
+            ser.close()
+            print(f"[{args.node_id}] Serial port closed. Collected {sample_count} samples.")
 
-except IOError as e:
-    print(f"Error opening/writing to file: {e}")
-finally:
-    if 'ser' in locals() and ser.is_open:
-        ser.close()
-        print("Serial port closed.")
+if __name__ == '__main__':
+    main()
