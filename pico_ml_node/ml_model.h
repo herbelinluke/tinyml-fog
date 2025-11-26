@@ -25,8 +25,9 @@
 #define NORMALIZE_DISTANCE 400.0f
 #define NORMALIZE_VELOCITY 50.0f
 
-// Anomaly threshold
-#define ANOMALY_THRESHOLD 0.5f
+// Anomaly threshold (higher = less sensitive, fewer false positives)
+// 0.5 = very sensitive, 0.7 = balanced, 0.85 = conservative
+#define ANOMALY_THRESHOLD 0.7f
 
 /**
  * Initialize the ML model
