@@ -1,3 +1,4 @@
+// NOTE DEPRECATED
 // HC-SR04 with Rolling Average Anomaly Detection
 // Output format: distance,anomaly_flag (e.g., "324,0" or "73,1")
 
