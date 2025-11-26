@@ -37,7 +37,7 @@ class FogNode:
         self.anomaly_events: deque = deque()  # (timestamp, node_id) tuples
         self.alert_threshold = alert_threshold  # Number of nodes that must report anomaly
         self.time_window = time_window  # Seconds to consider for alert
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # Use RLock to allow reentrant locking
         self.alert_active = False
         self.running = True
         
@@ -45,7 +45,7 @@ class FogNode:
         with self.lock:
             if node_id not in self.nodes:
                 self.nodes[node_id] = NodeState(node_id=node_id)
-                print(f"[FOG] Registered node: {node_id}")
+                print(f"[FOG] Registered node: {node_id}", flush=True)
     
     def report_reading(self, node_id: str, distance: int, anomaly: bool) -> None:
         timestamp = time.time()
@@ -98,11 +98,11 @@ class FogNode:
     
     def _raise_alert(self, affected_nodes: set) -> None:
         """Raise a system-level alert."""
-        print(f"\n{'='*60}")
-        print(f"[FOG] ⚠ SYSTEM ALERT - Multiple nodes reporting anomalies!")
-        print(f"[FOG] Affected nodes: {', '.join(sorted(affected_nodes))}")
-        print(f"[FOG] Threshold: {len(affected_nodes)}/{self.alert_threshold} nodes in {self.time_window}s window")
-        print(f"{'='*60}\n")
+        print(f"\n{'='*60}", flush=True)
+        print(f"[FOG] ⚠ SYSTEM ALERT - Multiple nodes reporting anomalies!", flush=True)
+        print(f"[FOG] Affected nodes: {', '.join(sorted(affected_nodes))}", flush=True)
+        print(f"[FOG] Threshold: {len(affected_nodes)}/{self.alert_threshold} nodes in {self.time_window}s window", flush=True)
+        print(f"{'='*60}\n", flush=True)
     
     def get_status(self) -> str:
         """Get current status of all nodes."""
@@ -163,7 +163,7 @@ def serial_reader(fog: FogNode, port: str, baud: int, node_id: str) -> None:
 def status_printer(fog: FogNode, interval: float = 2.0) -> None:
     """Periodically print the fog node status."""
     while fog.running:
-        print(fog.get_status())
+        print(fog.get_status(), flush=True)
         time.sleep(interval)
 
 
@@ -176,7 +176,7 @@ def udp_receiver(fog: FogNode, port: int) -> None:
     sock.bind(('0.0.0.0', port))
     sock.settimeout(1.0)
     
-    print(f"[FOG] UDP receiver listening on port {port}")
+    print(f"[FOG] UDP receiver listening on port {port}", flush=True)
     
     while fog.running:
         try:
@@ -219,11 +219,11 @@ def main():
     fog = FogNode(alert_threshold=args.alert_threshold, time_window=args.time_window)
     threads = []
 
-    print(f"[FOG] Starting Fog Node")
-    print(f"[FOG] Alert threshold: {args.alert_threshold} nodes in {args.time_window}s window")
+    print(f"[FOG] Starting Fog Node", flush=True)
+    print(f"[FOG] Alert threshold: {args.alert_threshold} nodes in {args.time_window}s window", flush=True)
     
     if args.simulated:
-        print(f"[FOG] Running in simulated mode on UDP port {args.udp_port}")
+        print(f"[FOG] Running in simulated mode on UDP port {args.udp_port}", flush=True)
         t = threading.Thread(target=udp_receiver, args=(fog, args.udp_port), daemon=True)
         t.start()
         threads.append(t)
