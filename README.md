@@ -1,5 +1,7 @@
 # TinyML Fog Computing Demo
 
+NOTE: this github repository was made largely with the help of cursor and Opus 4.5
+
 A distributed anomaly detection system with edge ML on Raspberry Pi Pico 2 and fog-level aggregation.
 
 ## Architecture
