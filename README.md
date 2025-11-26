@@ -1,186 +1,141 @@
 # TinyML Fog Computing Demo
 
-A distributed anomaly detection system demonstrating fog computing concepts with edge devices and a fog aggregation layer.
+A distributed anomaly detection system with edge ML on Raspberry Pi Pico 2 and fog-level aggregation.
 
 ## Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Edge Node 1   │    │   Edge Node 2   │    │   Edge Node N   │
-│  (Arduino/Pico) │    │  (Arduino/Pico) │    │  (Simulated)    │
-│                 │    │                 │    │                 │
-│  HC-SR04 Sensor │    │  HC-SR04 Sensor │    │  Synthetic Data │
-│        ↓        │    │        ↓        │    │        ↓        │
-│  Rolling Avg    │    │  Rolling Avg    │    │  Rolling Avg    │
-│  Anomaly Detect │    │  Anomaly Detect │    │  Anomaly Detect │
-└────────┬────────┘    └────────┬────────┘    └────────┬────────┘
-         │ Serial              │ Serial              │ UDP
-         └──────────────┬──────┴──────────────┬──────┘
-                        ↓                     ↓
-              ┌─────────────────────────────────────┐
-              │            Fog Node                 │
-              │         (Laptop/RPi)                │
-              │                                     │
-              │  • Aggregates multi-node data       │
-              │  • Sliding window anomaly count     │
-              │  • System-level alert when          │
-              │    threshold exceeded               │
-              └─────────────────────────────────────┘
+HC-SR04 Sensor → Arduino Nano → Pico 2 (ML) → Computer (Fog Node)
+                    UART           USB
 ```
 
-## Hardware Requirements
+- **Arduino**: Reads ultrasonic sensor, sends raw distance
+- **Pico 2**: Runs velocity-based ML model, detects fast approaches
+- **Fog Node**: Aggregates anomalies, triggers alerts on sustained events
 
-- Arduino Nano (or compatible) with HC-SR04 ultrasonic sensor
-- USB cable for serial communication
-- Optional: Additional Arduino/Pico boards for multi-node setup
-
-## Software Requirements
+## Quick Start (Simulated - No Hardware)
 
 ```bash
 pip install pyserial
-```
 
-## Quick Start
-
-### 1. Flash Arduino
-
-Upload `sketchs/ex_HC-SRO4_reading/ex_HC-SRO4_reading.ino` to your Arduino Nano.
-
-The sketch:
-- Reads distance from HC-SR04 sensor at 10Hz
-- Computes rolling average of last 10 readings
-- Detects anomalies when reading deviates >30% from average
-- Outputs: `distance,anomaly_flag` (e.g., `150,0` or `45,1`)
-
-### 2. Run Fog Node with Real Hardware
-
-```bash
-# Single Arduino node
-python fog_node.py --ports /dev/ttyUSB0
-
-# Multiple Arduino nodes
-python fog_node.py --ports /dev/ttyUSB0 /dev/ttyUSB1 /dev/ttyACM0
-```
-
-### 3. Run Fog Node with Simulated Nodes (No Hardware Required)
-
-Terminal 1 - Start fog node in simulated mode:
-```bash
+# Terminal 1: Fog node
 python fog_node.py --simulated --alert-threshold 2
-```
 
-Terminal 2 - Run multi-node simulation:
-```bash
+# Terminal 2: Simulated sensors
 python simulate_node.py --demo
 ```
 
-## Scripts
+## Hardware Setup
 
-### `fog_node.py` - Fog Aggregation Layer
+### Wiring
 
-Aggregates data from multiple edge nodes and raises system-level alerts.
+```
+HC-SR04 VCC  → Arduino 5V
+HC-SR04 GND  → Arduino GND
+HC-SR04 TRIG → Arduino D8
+HC-SR04 ECHO → Arduino D9
+Arduino TX   → Pico GP1 (pin 2)
+Arduino GND  → Pico GND (pin 38)
+Pico USB     → Computer
+```
+
+### Flash Arduino
+
+Upload `sketchs/arduino_sensor_node/arduino_sensor_node.ino` to Arduino Nano.
+
+### Build & Flash Pico 2
 
 ```bash
-python fog_node.py [OPTIONS]
+# Install Pico SDK (one time)
+sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+git clone https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+cd ~/pico-sdk && git submodule update --init
+export PICO_SDK_PATH=~/pico-sdk
 
-Options:
-  --ports           Serial ports to connect (default: /dev/ttyUSB0)
-  --baud            Baud rate (default: 9600)
-  --alert-threshold Number of anomalous nodes to trigger alert (default: 2)
-  --time-window     Seconds to consider for anomaly aggregation (default: 5.0)
-  --status-interval Dashboard update interval (default: 3.0)
-  --simulated       Use UDP input from simulate_node.py
-  --udp-port        UDP port for simulated mode (default: 5000)
+# Build
+cd pico_ml_node
+mkdir build && cd build
+cmake .. -DPICO_BOARD=pico2
+make -j4
+
+# Flash: Hold BOOTSEL, plug in Pico, copy .uf2 to drive
+cp pico_ml_node.uf2 /media/$USER/RP2350/
 ```
 
-### `simulate_node.py` - Virtual Sensor Nodes
-
-Generate synthetic sensor data for testing without hardware.
+### Run Fog Node
 
 ```bash
-# Single node output to stdout
-python simulate_node.py --node-id sensor_1
-
-# Multi-node demo with coordinated anomalies
-python simulate_node.py --demo
-
-# Custom parameters
-python simulate_node.py --base-distance 150 --anomaly-rate 0.1
+python fog_node.py --ports /dev/ttyACM1 --min-anomalies 3
 ```
 
-### `collect.py` - Data Collection
+## Training Your Own Model
 
-Collect sensor data to CSV for analysis or model training.
+### 1. Collect Data
 
 ```bash
-python collect.py --port /dev/ttyUSB0 --node-id node_1 --output data.csv --samples 1000
+python collect_training_data.py
+```
+- Press `n` → collect NORMAL data (walking around)
+- Press `a` → collect ANOMALY data (rushing toward sensor)
+- Press `q` → save and quit
+
+### 2. Train Model
+
+```bash
+pip install tensorflow numpy pandas scikit-learn
+python train_velocity_model.py
 ```
 
-### `collect_control.py` - Labeled Data Collection
+Outputs `velocity_model.h` with weights for Pico.
 
-Collect labeled data for training. Press 'a' + Enter to mark next 3 seconds as anomaly.
+### 3. Deploy
 
-## Anomaly Detection Logic
+1. Copy weights from `velocity_model.h` to `pico_ml_node/ml_model.h`
+2. Rebuild: `cd pico_ml_node/build && make`
+3. Flash new `.uf2` file
 
-### Edge Level (Arduino)
-1. Maintain rolling average of last 10 valid readings
-2. Compare current reading against rolling average
-3. Flag as anomaly if deviation > 30% or outside valid range (2-400cm)
-4. Only update rolling average with non-anomalous readings
+## ML Model
 
-### Fog Level
-1. Receive readings from all connected nodes
-2. Track anomaly events in sliding time window
-3. Count unique nodes reporting anomalies
-4. Raise system alert when count >= threshold
+Uses 6 velocity-based features computed from a 10-reading buffer:
 
-## Example Output
+| Feature | Description |
+|---------|-------------|
+| distance | Current reading (normalized) |
+| velocity | Rate of change |
+| acceleration | Rate of velocity change |
+| variance | Stability over window |
+| min | Minimum in window |
+| max | Maximum in window |
 
+Architecture: `Input(6) → Dense(12, ReLU) → Dense(6, ReLU) → Dense(1, Sigmoid)`
+
+Size: ~170 parameters, <1KB on device
+
+### Tuning
+
+Adjust sensitivity in `pico_ml_node/ml_model.h`:
+```c
+#define ANOMALY_THRESHOLD 0.7f  // Higher = less sensitive
 ```
-[FOG] Starting Fog Node
-[FOG] Alert threshold: 2 nodes in 5.0s window
-[FOG] Running in simulated mode on UDP port 5000
 
-==================================================
-[FOG] Node Status Dashboard - 14:32:15
-==================================================
-  🟢 node_1: dist=102cm ✓ | anomalies(recent/total): 0/3
-  🟢 node_2: dist=148cm ✓ | anomalies(recent/total): 0/2
-  🟢 node_3: dist=195cm ⚠ | anomalies(recent/total): 1/5
-
-  System: ✓ Normal
-==================================================
-
-============================================================
-[FOG] ⚠ SYSTEM ALERT - Multiple nodes reporting anomalies!
-[FOG] Affected nodes: node_1, node_2
-[FOG] Threshold: 2/2 nodes in 5.0s window
-============================================================
+Adjust fog alerts:
+```bash
+python fog_node.py --min-anomalies 3 --time-window 5.0
 ```
 
 ## Project Structure
 
 ```
-tinyml-fog/
+├── pico_ml_node/              # Pico 2 firmware
+│   ├── main.cpp               # UART receive + USB output
+│   ├── ml_model.cpp           # TFLite inference
+│   ├── ml_model.h             # Model weights + config
+│   └── CMakeLists.txt
 ├── sketchs/
-│   └── ex_HC-SRO4_reading/
-│       └── ex_HC-SRO4_reading.ino  # Arduino sketch with anomaly detection
-├── fog_node.py          # Fog aggregation layer
-├── simulate_node.py     # Virtual node simulator
-├── collect.py           # Data collection script
-├── collect_control.py   # Labeled data collection
-├── arduino_data.csv     # Collected sensor data
-├── anomoly_data.csv     # Labeled anomaly data
-└── README.md
+│   └── arduino_sensor_node/   # Arduino sensor sketch
+├── fog_node.py                # Fog aggregation
+├── simulate_node.py           # Virtual sensors for testing
+├── train_velocity_model.py    # Model training
+├── collect_training_data.py   # Labeled data collection
+└── training_data.csv          # Your collected data
 ```
-
-## Stretch Goals
-
-### TFLite Micro on Pico 2
-- Train model using `anomoly_data.csv`
-- Convert to TFLite format
-- Deploy on Raspberry Pi Pico 2
-
-### BLE Communication
-- Implement BLE peripheral on Nordic nRF52840
-- Update fog node to receive BLE advertisements
