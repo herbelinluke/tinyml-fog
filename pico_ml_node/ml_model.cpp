@@ -1,59 +1,70 @@
 /**
- * TinyML Anomaly Detection Model Implementation
+ * Velocity-Based TinyML Anomaly Detection Model
  * 
- * Manually implemented neural network for Raspberry Pi Pico 2.
- * This avoids the complexity of TFLite Micro while still running real ML.
+ * This model uses velocity and acceleration features to detect
+ * fast-approaching objects vs normal movement.
  */
 
 #include "ml_model.h"
 #include <math.h>
+#include <string.h>
 
 // ============================================================================
-// MODEL WEIGHTS (extracted from trained Keras model)
+// MODEL WEIGHTS (from velocity_model.h - trained on your data!)
 // ============================================================================
 
-// Layer 0: Input(10) -> Dense(8)
-static const float layer0_weights[10][8] = {
-  {-0.547934f, 0.368171f, -0.310684f, 0.551349f, -0.126685f, 0.208559f, -0.365375f, 0.075177f},
-  {-0.312322f, 0.496048f, 0.209948f, -0.111037f, -0.207391f, -0.339548f, 0.203184f, 0.118198f},
-  {0.570218f, 0.561503f, 0.159296f, 0.459575f, 0.293842f, 0.283696f, 0.415165f, 0.005862f},
-  {-0.368935f, 0.004170f, 0.538589f, -0.269605f, 0.511725f, -0.485512f, 0.010571f, -0.487563f},
-  {0.505109f, -0.574965f, 0.164953f, 0.394082f, 0.010531f, -0.552365f, -0.334434f, -0.065905f},
-  {0.359542f, -0.405387f, 0.180085f, 0.168944f, -0.074708f, -0.110911f, -0.155789f, -0.524581f},
-  {-0.420307f, 0.426860f, 0.557613f, 0.255339f, 0.287399f, -0.422156f, -0.430643f, -0.270856f},
-  {-0.461581f, -0.058715f, 0.370266f, -0.147029f, 0.213512f, 0.144605f, 0.513596f, 0.038397f},
-  {0.255745f, 0.473398f, 0.000395f, -0.071642f, -0.273866f, 0.473182f, -0.033184f, 0.304584f},
-  {-0.046502f, 0.243109f, -0.118775f, 0.308159f, 0.382390f, -0.548670f, -0.434916f, 0.271029f},
+// Layer 0: Input(6) -> Dense(12)
+static const float layer0_weights[6][12] = {
+  {0.387261f, -0.332460f, -0.292667f, 0.118109f, -0.032074f, -0.347523f, -0.440345f, -0.477795f, 0.218620f, -0.867517f, 0.080515f, 0.024464f},
+  {-0.047505f, -0.330219f, 0.037214f, -0.087660f, -0.443055f, -0.409413f, -0.874368f, -0.487395f, -0.450714f, -0.263652f, -0.031044f, 0.055062f},
+  {0.019224f, -0.098385f, -0.498280f, 0.033631f, 0.089105f, 0.482391f, -0.420444f, 0.597352f, 0.170925f, 0.524204f, 0.009185f, -0.147526f},
+  {-0.575260f, -0.395804f, -0.144997f, -0.410547f, 0.803103f, 0.046980f, 0.386072f, -0.513782f, -0.041824f, 0.018926f, -0.549339f, -0.278441f},
+  {1.575496f, 0.934077f, 0.028041f, 1.760804f, -1.371529f, 0.471924f, -0.293671f, 0.514026f, -1.475951f, -1.078016f, 1.750951f, -1.431085f},
+  {-0.046556f, -0.326845f, -0.443476f, 0.009740f, 0.568812f, -0.230694f, -0.288209f, -0.119395f, 0.175485f, -0.013711f, 0.258301f, 0.107969f},
 };
-static const float layer0_bias[8] = {
-  0.000402f, -0.012709f, 0.012689f, -0.012712f, 0.012704f, 0.000000f, 0.003373f, 0.003100f
+static const float layer0_bias[12] = {
+  -0.108214f, -0.165671f, -0.242598f, -0.021455f, 0.112047f, -0.232315f, 0.227239f, -0.299683f, 0.150179f, 0.399915f, -0.166727f, -0.163087f
 };
 
-// Layer 1: Dense(8) -> Dense(4)
-static const float layer1_weights[8][4] = {
-  {-0.124593f, 0.070006f, 0.520561f, -0.550806f},
-  {-0.402958f, -0.593736f, 0.648580f, -0.342894f},
-  {-0.639053f, -0.273512f, -0.106319f, -0.213241f},
-  {-0.527721f, -0.682552f, 0.315310f, -0.021264f},
-  {0.195438f, -0.102784f, -0.556783f, -0.266771f},
-  {-0.179854f, 0.523734f, -0.205138f, -0.245908f},
-  {-0.476619f, 0.576454f, -0.256109f, 0.113325f},
-  {-0.706053f, -0.337521f, 0.028793f, 0.599764f},
+// Layer 1: Dense(12) -> Dense(6)
+static const float layer1_weights[12][6] = {
+  {1.088511f, 0.025872f, -1.047072f, 0.975989f, -0.624394f, -1.127654f},
+  {0.145536f, 0.124924f, -0.188646f, 0.695775f, -0.624649f, -0.528294f},
+  {-0.091962f, 0.430308f, 0.258699f, -0.230842f, -0.706717f, -0.520500f},
+  {0.752731f, -0.212321f, -0.861784f, 0.789613f, -0.282005f, -0.575482f},
+  {-0.122434f, -0.327441f, 0.116379f, -0.160292f, 0.800713f, -0.498646f},
+  {0.480305f, -0.546920f, -0.196883f, 0.151248f, -0.438578f, -0.205371f},
+  {-1.176893f, -0.046567f, 0.183903f, 0.393992f, 0.152227f, 0.559130f},
+  {-0.345463f, -0.380870f, -0.682587f, 0.009564f, -0.630266f, 0.068485f},
+  {-0.810781f, -0.454471f, 0.784011f, -0.454361f, 0.655426f, 0.158565f},
+  {-0.322522f, -0.311877f, 0.719904f, 0.362692f, 0.486865f, 0.373095f},
+  {0.588995f, -0.515867f, -0.863079f, 0.750727f, -0.835204f, -0.737857f},
+  {-0.057193f, 0.153582f, 0.418910f, -0.106476f, -0.065761f, 0.613881f},
 };
-static const float layer1_bias[4] = {
-  0.000000f, 0.000000f, -0.012707f, 0.000000f
+static const float layer1_bias[6] = {
+  0.516955f, -0.151833f, 0.649389f, 0.202238f, 0.603951f, 0.598122f
 };
 
-// Layer 2: Dense(4) -> Dense(1, sigmoid)
-static const float layer2_weights[4][1] = {
-  {0.607788f},
-  {-1.008546f},
-  {-0.881951f},
-  {0.279320f},
+// Layer 2: Dense(6) -> Dense(1, sigmoid)
+static const float layer2_weights[6][1] = {
+  {-1.286565f},
+  {0.997193f},
+  {1.037104f},
+  {-1.140760f},
+  {1.450165f},
+  {0.519883f},
 };
 static const float layer2_bias[1] = {
-  0.012666f
+  -0.010462f
 };
+
+// ============================================================================
+// HISTORY BUFFER
+// ============================================================================
+
+static float history[WINDOW_SIZE];
+static int history_index = 0;
+static int history_count = 0;
 
 // ============================================================================
 // ACTIVATION FUNCTIONS
@@ -68,35 +79,114 @@ static inline float sigmoid(float x) {
 }
 
 // ============================================================================
-// INFERENCE
+// FEATURE COMPUTATION
+// ============================================================================
+
+static void compute_features(float* features) {
+    // Get current distance
+    int current_idx = (history_index - 1 + WINDOW_SIZE) % WINDOW_SIZE;
+    float current = history[current_idx];
+    
+    // Compute velocities (differences between consecutive readings)
+    float velocities[WINDOW_SIZE - 1];
+    for (int i = 0; i < history_count - 1; i++) {
+        int idx1 = (history_index - history_count + i + WINDOW_SIZE) % WINDOW_SIZE;
+        int idx2 = (idx1 + 1) % WINDOW_SIZE;
+        velocities[i] = history[idx2] - history[idx1];
+    }
+    
+    // Current velocity (most recent change)
+    float velocity = 0.0f;
+    if (history_count >= 2) {
+        int prev_idx = (current_idx - 1 + WINDOW_SIZE) % WINDOW_SIZE;
+        velocity = current - history[prev_idx];
+    }
+    
+    // Acceleration (change in velocity)
+    float acceleration = 0.0f;
+    if (history_count >= 3) {
+        int prev_idx = (current_idx - 1 + WINDOW_SIZE) % WINDOW_SIZE;
+        int prev2_idx = (current_idx - 2 + WINDOW_SIZE) % WINDOW_SIZE;
+        float prev_velocity = history[prev_idx] - history[prev2_idx];
+        acceleration = velocity - prev_velocity;
+    }
+    
+    // Compute statistics over the window
+    float sum = 0.0f;
+    float min_val = history[0];
+    float max_val = history[0];
+    
+    for (int i = 0; i < history_count; i++) {
+        int idx = (history_index - history_count + i + WINDOW_SIZE) % WINDOW_SIZE;
+        float val = history[idx];
+        sum += val;
+        if (val < min_val) min_val = val;
+        if (val > max_val) max_val = val;
+    }
+    
+    float mean = sum / history_count;
+    
+    // Compute variance
+    float variance = 0.0f;
+    for (int i = 0; i < history_count; i++) {
+        int idx = (history_index - history_count + i + WINDOW_SIZE) % WINDOW_SIZE;
+        float diff = history[idx] - mean;
+        variance += diff * diff;
+    }
+    variance = sqrtf(variance / history_count);  // Standard deviation
+    
+    // Build normalized feature vector
+    features[0] = current / NORMALIZE_DISTANCE;
+    features[1] = velocity / NORMALIZE_VELOCITY;
+    features[2] = acceleration / NORMALIZE_VELOCITY;
+    features[3] = variance / NORMALIZE_DISTANCE;
+    features[4] = min_val / NORMALIZE_DISTANCE;
+    features[5] = max_val / NORMALIZE_DISTANCE;
+}
+
+// ============================================================================
+// PUBLIC API
 // ============================================================================
 
 void ml_model_init(void) {
-    // No initialization needed for this simple model
-    // Weights are compiled into the binary
+    memset(history, 0, sizeof(history));
+    history_index = 0;
+    history_count = 0;
 }
 
-float ml_model_predict(const float* input) {
-    float normalized[INPUT_SIZE];
-    float hidden1[HIDDEN1_SIZE];
-    float hidden2[HIDDEN2_SIZE];
-    float output;
-    
-    // Normalize input
-    for (int i = 0; i < INPUT_SIZE; i++) {
-        normalized[i] = input[i] / NORMALIZE_MAX;
+void ml_model_add_reading(float distance) {
+    history[history_index] = distance;
+    history_index = (history_index + 1) % WINDOW_SIZE;
+    if (history_count < WINDOW_SIZE) {
+        history_count++;
+    }
+}
+
+int ml_model_is_ready(void) {
+    return history_count >= 3;  // Need at least 3 readings for velocity/acceleration
+}
+
+float ml_model_predict(void) {
+    if (!ml_model_is_ready()) {
+        return 0.0f;
     }
     
+    // Compute features
+    float features[FEATURE_COUNT];
+    compute_features(features);
+    
     // Layer 0: Input -> Hidden1 (Dense + ReLU)
+    float hidden1[HIDDEN1_SIZE];
     for (int j = 0; j < HIDDEN1_SIZE; j++) {
         float sum = layer0_bias[j];
-        for (int i = 0; i < INPUT_SIZE; i++) {
-            sum += normalized[i] * layer0_weights[i][j];
+        for (int i = 0; i < FEATURE_COUNT; i++) {
+            sum += features[i] * layer0_weights[i][j];
         }
         hidden1[j] = relu(sum);
     }
     
     // Layer 1: Hidden1 -> Hidden2 (Dense + ReLU)
+    float hidden2[HIDDEN2_SIZE];
     for (int j = 0; j < HIDDEN2_SIZE; j++) {
         float sum = layer1_bias[j];
         for (int i = 0; i < HIDDEN1_SIZE; i++) {
@@ -106,7 +196,7 @@ float ml_model_predict(const float* input) {
     }
     
     // Layer 2: Hidden2 -> Output (Dense + Sigmoid)
-    output = layer2_bias[0];
+    float output = layer2_bias[0];
     for (int i = 0; i < HIDDEN2_SIZE; i++) {
         output += hidden2[i] * layer2_weights[i][0];
     }
@@ -118,4 +208,3 @@ float ml_model_predict(const float* input) {
 int ml_model_is_anomaly(float probability) {
     return probability > ANOMALY_THRESHOLD ? 1 : 0;
 }
-
