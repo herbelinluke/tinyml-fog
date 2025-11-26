@@ -1,10 +1,12 @@
 /**
- * TinyML Anomaly Detection Model
+ * Velocity-Based TinyML Anomaly Detection Model
  * 
- * This is a manually implemented neural network based on the trained model.
- * Architecture: Input(10) -> Dense(8, relu) -> Dense(4, relu) -> Dense(1, sigmoid)
+ * This model detects fast-approaching objects by analyzing:
+ * - Velocity (rate of distance change)
+ * - Acceleration (rate of velocity change)
+ * - Distance variance (stability)
  * 
- * The weights are extracted from the trained Keras model.
+ * Features: [distance, velocity, acceleration, variance, min, max]
  */
 
 #ifndef ML_MODEL_H
@@ -13,29 +15,44 @@
 #include <stdint.h>
 
 // Model configuration
-#define INPUT_SIZE 10
-#define HIDDEN1_SIZE 8
-#define HIDDEN2_SIZE 4
+#define WINDOW_SIZE 10            // Number of readings to keep in history
+#define FEATURE_COUNT 6           // Number of computed features
+#define HIDDEN1_SIZE 12           // First hidden layer
+#define HIDDEN2_SIZE 6            // Second hidden layer
 #define OUTPUT_SIZE 1
 
-// Normalization constant (must match training)
-#define NORMALIZE_MAX 400.0f
+// Normalization constants (must match training)
+#define NORMALIZE_DISTANCE 400.0f
+#define NORMALIZE_VELOCITY 50.0f
 
 // Anomaly threshold
 #define ANOMALY_THRESHOLD 0.5f
 
 /**
- * Initialize the ML model (loads weights)
+ * Initialize the ML model
  */
 void ml_model_init(void);
 
 /**
- * Run inference on a window of sensor readings
+ * Add a new distance reading to the history buffer
  * 
- * @param input Array of INPUT_SIZE raw distance readings (will be normalized internally)
+ * @param distance Raw distance reading in cm
+ */
+void ml_model_add_reading(float distance);
+
+/**
+ * Run inference on the current history buffer
+ * 
  * @return Anomaly probability (0.0 - 1.0)
  */
-float ml_model_predict(const float* input);
+float ml_model_predict(void);
+
+/**
+ * Check if we have enough readings to make predictions
+ * 
+ * @return 1 if buffer is ready, 0 otherwise
+ */
+int ml_model_is_ready(void);
 
 /**
  * Check if prediction indicates anomaly
@@ -46,4 +63,3 @@ float ml_model_predict(const float* input);
 int ml_model_is_anomaly(float probability);
 
 #endif // ML_MODEL_H
-
