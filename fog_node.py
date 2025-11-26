@@ -134,26 +134,45 @@ class FogNode:
 
 
 def serial_reader(fog: FogNode, port: str, baud: int, node_id: str) -> None:
-    """Read from a serial port and report to fog node."""
+    """Read from a serial port and report to fog node.
+    
+    Supports multiple formats:
+    - Arduino format: "distance,anomaly"
+    - Pico ML format: "node_id,distance,anomaly,confidence"
+    """
     fog.register_node(node_id)
     
     while fog.running:
         try:
             with serial.Serial(port, baud, timeout=1) as ser:
-                print(f"[{node_id}] Connected to {port}")
+                print(f"[{node_id}] Connected to {port}", flush=True)
                 while fog.running:
                     line = ser.readline().decode('utf-8').strip()
-                    if line:
+                    if line and not line.startswith('#'):  # Skip comment lines
                         try:
                             parts = line.split(',')
-                            if len(parts) >= 2:
+                            
+                            # Pico ML format: node_id,distance,anomaly,confidence
+                            if len(parts) >= 4 and parts[0].startswith('pico'):
+                                actual_node_id = parts[0]
+                                distance = int(parts[1])
+                                anomaly = int(parts[2]) == 1
+                                confidence = float(parts[3])
+                                fog.report_reading(actual_node_id, distance, anomaly)
+                                # Print with confidence for ML nodes
+                                status = "ANOMALY" if anomaly else "ok"
+                                print(f"  [{actual_node_id}] dist={distance}cm conf={confidence:.2f} [{status}]", flush=True)
+                            
+                            # Arduino format: distance,anomaly
+                            elif len(parts) >= 2:
                                 distance = int(parts[0])
                                 anomaly = int(parts[1]) == 1
                                 fog.report_reading(node_id, distance, anomaly)
+                                
                         except ValueError:
                             pass  # Ignore malformed lines
         except serial.SerialException as e:
-            print(f"[{node_id}] Serial error: {e}. Retrying in 5s...")
+            print(f"[{node_id}] Serial error: {e}. Retrying in 5s...", flush=True)
             with fog.lock:
                 if node_id in fog.nodes:
                     fog.nodes[node_id].connected = False

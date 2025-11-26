@@ -1,2 +1,3 @@
 .fog
 __pycache__
+pico_ml_node/build/
